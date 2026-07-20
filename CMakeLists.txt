@@ -1,169 +1,145 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.15)
+project(libgo LANGUAGES CXX C ASM)
 
-###################################################################################
-project(libgo)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-enable_language(C ASM)
-
-if (CMAKE_BUILD_TYPE)
-else()
-    set(CMAKE_BUILD_TYPE RELEASE)
-    #set(CMAKE_BUILD_TYPE DEBUG)
+# ============================================================
+# FetchContent SOURCE_DIR 支持
+# ============================================================
+if(NOT libgo_SOURCE_DIR)
+    set(libgo_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
-message("------------ Options -------------")
-message("  CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
-message("  CMAKE_COMMAND: ${CMAKE_COMMAND}")
+# ============================================================
+# 选项定义
+# ============================================================
+option(LIBGO_ENABLE_DEBUGGER "Enable libgo debugger" OFF)
+option(LIBGO_DISABLE_HOOK "Disable hook (use disable_hook netio)" OFF)
 
-option(ENABLE_DEBUGGER "enable debugger" OFF)
-if (ENABLE_DEBUGGER)
-    set(ENABLE_DEBUGGER 1)
-    message ("  enable_debugger: yes")
-else()
-    set(ENABLE_DEBUGGER 0)
-    message ("  enable_debugger: no")
+# ============================================================
+# 1. 准备配置头文件路径（仅定义变量，不操作 target）
+# ============================================================
+set(_cmake_config_output "${CMAKE_CURRENT_BINARY_DIR}/libgo/common/cmake_config.h")
+
+# 先生成头文件（这步可以在 add_library 之前）
+configure_file(
+    "${libgo_SOURCE_DIR}/libgo/common/cmake_config.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/libgo/common/cmake_config.h"
+    @ONLY
+)
+message(STATUS "CMAKE_CURRENT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}")
+# ============================================================
+# 2. 收集源文件（保持原有逻辑不变）
+# ============================================================
+file(GLOB LIBGO_COMMON_SOURCES "${libgo_SOURCE_DIR}/libgo/common/*.cpp")
+file(GLOB LIBGO_COROUTINE_SOURCES "${libgo_SOURCE_DIR}/libgo/coroutine/*.cpp")
+file(GLOB LIBGO_SCHEDULER_SOURCES "${libgo_SOURCE_DIR}/libgo/scheduler/*.cpp")
+file(GLOB LIBGO_TASK_SOURCES "${libgo_SOURCE_DIR}/libgo/task/*.cpp")
+file(GLOB LIBGO_DEBUGGER_SOURCES "${libgo_SOURCE_DIR}/libgo/debugger/*.cpp")
+file(GLOB LIBGO_ROUTINE_SYNC_SOURCES "${libgo_SOURCE_DIR}/libgo/routine_sync_libgo/*.cpp")
+file(GLOB LIBGO_TIMER_SOURCES "${libgo_SOURCE_DIR}/libgo/timer/*.cpp")
+file(GLOB LIBGO_CLS_SOURCES "${libgo_SOURCE_DIR}/libgo/cls/*.cpp")
+file(GLOB LIBGO_DEFER_SOURCES "${libgo_SOURCE_DIR}/libgo/defer/*.cpp")
+file(GLOB LIBGO_POOL_SOURCES "${libgo_SOURCE_DIR}/libgo/pool/*.cpp")
+file(GLOB LIBGO_DEBUG_SOURCES "${libgo_SOURCE_DIR}/libgo/debug/*.cpp")
+
+set(LIBGO_ALL_SOURCES
+    ${LIBGO_COMMON_SOURCES}
+    ${LIBGO_COROUTINE_SOURCES}
+    ${LIBGO_SCHEDULER_SOURCES}
+    ${LIBGO_TASK_SOURCES}
+    ${LIBGO_ROUTINE_SYNC_SOURCES}
+    ${LIBGO_TIMER_SOURCES}
+    ${LIBGO_CLS_SOURCES}
+    ${LIBGO_DEFER_SOURCES}
+    ${LIBGO_POOL_SOURCES}
+    ${LIBGO_DEBUG_SOURCES}
+)
+
+if(LIBGO_ENABLE_DEBUGGER)
+    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_DEBUGGER_SOURCES})
 endif()
 
-option(DISABLE_HOOK "disable hook" OFF)
-if (DISABLE_HOOK)
-    set(ENABLE_HOOK 0)
-    message ("  enable_hook: no")
-else()
-    set(ENABLE_HOOK 1)
-    message ("  enable_hook: yes")
-endif()
+# ============================================================
+# 3. 平台特定源文件
+# ============================================================
+if(WIN32)
+    file(GLOB LIBGO_NETIO_WIN_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/windows/*.cpp")
+    file(GLOB LIBGO_FIBER_SOURCES "${libgo_SOURCE_DIR}/libgo/context/fiber/*.cpp")
+    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_NETIO_WIN_SOURCES} ${LIBGO_FIBER_SOURCES})
 
-set(USE_ROUTINE_SYNC 1)
-message ("  use routine_sync tools: yes")
-
-if (BUILD_DYNAMIC)
-    message ("  build dynamic lib: yes")
-else()
-    message ("  build dynamic lib: no")
-endif()
-
-message("-------------- Env ---------------")
-message("  CMAKE_SOURCE_DIR: ${CMAKE_SOURCE_DIR}")
-message("  CMAKE_BINARY_DIR: ${CMAKE_BINARY_DIR}")
-message("----------------------------------")
-
-configure_file(${PROJECT_SOURCE_DIR}/libgo/common/cmake_config.h.in ${PROJECT_SOURCE_DIR}/libgo/common/cmake_config.h)
-message("----------------------------------")
-
-if (UNIX)
-    set(CMAKE_CXX_FLAGS "-std=c++11 -D__const__=  -fPIC -fno-strict-aliasing -Wall ${CMAKE_CXX_FLAGS}")
-    set(CMAKE_CXX_FLAGS_DEBUG "-g")
-    set(CMAKE_CXX_FLAGS_RELEASE "-g -O3 -DNDEBUG")
-
-    execute_process(COMMAND "chmod" "+x" "${PROJECT_SOURCE_DIR}/third_party/select_asm.sh")
-    execute_process(COMMAND "chmod" "+x" "${PROJECT_SOURCE_DIR}/third_party/boost.context/bootstrap.sh")
-    execute_process(COMMAND "chmod" "+x" "${PROJECT_SOURCE_DIR}/third_party/boost.context/tools/build/src/engine/build.sh")
-	
-    set(CMAKE_ASM_SOURCE_FILE_EXTENSIONS S)
-    message("--> select asm source file, please wait about 5 seconds ...")
-    execute_process(COMMAND "${PROJECT_SOURCE_DIR}/third_party/select_asm.sh" "${PROJECT_SOURCE_DIR}" "jump" OUTPUT_VARIABLE jump_asm_file)
-    execute_process(COMMAND "${PROJECT_SOURCE_DIR}/third_party/select_asm.sh" "${PROJECT_SOURCE_DIR}" "make" OUTPUT_VARIABLE make_asm_file)
-elseif (WIN32)
-    # windows platform
-    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd /EHsc")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /EHsc")
-
-    #set(CMAKE_ASM_SOURCE_FILE_EXTENSIONS asm)
-    #file(COPY ${PROJECT_SOURCE_DIR}/third_party/boost.context/libs/context/src/asm/make_x86_64_ms_pe_masm.asm DESTINATION ${PROJECT_SOURCE_DIR}/libgo/context)
-    #file(COPY ${PROJECT_SOURCE_DIR}/third_party/boost.context/libs/context/src/asm/jump_x86_64_ms_pe_masm.asm DESTINATION ${PROJECT_SOURCE_DIR}/libgo/context)
-endif()
-
-message("------------ Cxx flags -------------")
-message("  CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}: ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
-message("------------------------------------")
-
-include_directories(${PROJECT_SOURCE_DIR})
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/common CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/context CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/task CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/scheduler CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/routine_sync_libgo CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/timer CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/cls CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/defer CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/pool CO_SRC_LIST)
-aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/debug CO_SRC_LIST)
-
-if (NOT DISABLE_HOOK)
-    if (UNIX)
-        aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/netio/unix CO_SRC_LIST)
-    elseif (WIN32)
-	include_directories(${PROJECT_SOURCE_DIR}/libgo/netio/windows)
-        aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/netio/windows CO_SRC_LIST)
-	aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/context/fiber CO_SRC_LIST)
-	list(APPEND CO_SRC_LIST ${PROJECT_SOURCE_DIR}/libgo/netio/windows/xhook/xhook.cpp)
+    if(NOT LIBGO_DISABLE_HOOK)
+        list(APPEND LIBGO_ALL_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/windows/xhook/xhook.cpp")
+    else()
+        file(GLOB LIBGO_DISABLE_HOOK_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/disable_hook/*.cpp")
+        list(APPEND LIBGO_ALL_SOURCES ${LIBGO_DISABLE_HOOK_SOURCES})
     endif()
-else()
-    aux_source_directory(${PROJECT_SOURCE_DIR}/libgo/netio/disable_hook CO_SRC_LIST)
-endif()
-
-set(TARGET "libgo")
-set(STATIC_T "libgo_static")
-set(STATIC_HOOK "static_hook")
-
-list(APPEND CO_SRC_LIST ${jump_asm_file})
-list(APPEND CO_SRC_LIST ${make_asm_file})
-add_library("${STATIC_T}" STATIC ${CO_SRC_LIST})
-set_target_properties("${STATIC_T}" PROPERTIES OUTPUT_NAME "${TARGET}")
-
-if (UNIX)
-    install(TARGETS ${STATIC_T} LIBRARY DESTINATION "lib" ARCHIVE DESTINATION "lib")
-    install(DIRECTORY ${PROJECT_SOURCE_DIR}/libgo/ DESTINATION "include/libgo" FILES_MATCHING PATTERN "*.h")
-        #PATTERN "windows" EXCLUDE
-
-    add_library("${STATIC_HOOK}" STATIC "${PROJECT_SOURCE_DIR}/libgo/netio/unix/static_hook/static_hook.cpp")
-
-    if (BUILD_DYNAMIC)
-        set(SHARED_T "libgo_dynamic")
-        add_library("${SHARED_T}" SHARED ${CO_SRC_LIST})
-        set_target_properties("${SHARED_T}" PROPERTIES OUTPUT_NAME "${TARGET}")
-        target_link_libraries("${SHARED_T}" ${LINK_LIBS} -ldl)
-        install(TARGETS ${SHARED_T} LIBRARY DESTINATION "lib" ARCHIVE DESTINATION "lib")
+elseif(UNIX)
+    if(NOT LIBGO_DISABLE_HOOK)
+        file(GLOB_RECURSE LIBGO_PLATFORM_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/unix/*.cpp")
+    else()
+        file(GLOB LIBGO_PLATFORM_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/disable_hook/*.cpp")
     endif()
+    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_PLATFORM_SOURCES})
 
-    add_custom_target(debug
-        COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=DEBUG ${CMAKE_SOURCE_DIR}
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target all
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Switch CMAKE_BUILD_TYPE to Debug"
+    execute_process(
+        COMMAND bash "${libgo_SOURCE_DIR}/third_party/select_asm.sh" "${libgo_SOURCE_DIR}" "jump"
+        OUTPUT_VARIABLE LIBGO_JUMP_ASM OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE ASM_SELECT_RESULT
     )
-
-    add_custom_target(release
-        COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=RELEASE ${CMAKE_SOURCE_DIR}
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target all
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Switch CMAKE_BUILD_TYPE to Release"
+    execute_process(
+        COMMAND bash "${libgo_SOURCE_DIR}/third_party/select_asm.sh" "${libgo_SOURCE_DIR}" "make"
+        OUTPUT_VARIABLE LIBGO_MAKE_ASM OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-
-    set(PROFILE_FLAGS "-pg ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
-
-    #message("PROFILE_FLAGS: ${PROFILE_FLAGS}")
-    add_custom_target(profile
-        COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=PROFILE -DCMAKE_CXX_FLAGS_PROFILE=\\'${PROFILE_FLAGS}\\' ${CMAKE_SOURCE_DIR}
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target all
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Switch CMAKE_BUILD_TYPE to PROFILE"
-    )
-
-    add_custom_target(uninstall
-        COMMAND rm ${CMAKE_INSTALL_PREFIX}/lib/liblibgo.a ${CMAKE_INSTALL_PREFIX}/lib/liblibgo.so ${CMAKE_INSTALL_PREFIX}/lib/liblibgo_main.a -f
-        COMMAND rm ${CMAKE_INSTALL_PREFIX}/include/libgo -rf
-    )
-
-elseif (WIN32)
-    set_target_properties("${STATIC_T}" PROPERTIES COMPILE_FLAGS "/wd4819 /wd4267")
-endif()
-
-if (WIN32)
-    if (BOOST_ROOT)
-	    add_subdirectory(${PROJECT_SOURCE_DIR}/test/gtest_unit)
-	    add_subdirectory(${PROJECT_SOURCE_DIR}/tutorial)
+    if(NOT ASM_SELECT_RESULT EQUAL 0)
+        message(FATAL_ERROR "[libgo] select_asm.sh failed with code ${ASM_SELECT_RESULT}")
     endif()
+    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_JUMP_ASM} ${LIBGO_MAKE_ASM})
 endif()
+
+# ============================================================
+# 4. 创建 Target ⬅️ 必须在这里先创建
+# ============================================================
+add_library(libgo_core STATIC ${LIBGO_ALL_SOURCES})
+add_library(libgo::libgo ALIAS libgo_core)
+
+# ============================================================
+# 5. 设置编译定义 ⬅️ 移到 add_library 之后
+# ============================================================
+# 将绝对路径作为字符串传给编译器
+string(REPLACE "/" "\\\\" _cmake_config_output_escaped "${_cmake_config_output}")
+target_compile_definitions(libgo_core PRIVATE
+    LIBGO_CMAKE_CONFIG_H_PATH="${_cmake_config_output_escaped}"
+)
+
+# ============================================================
+# 6. Include 目录 & 平台编译选项
+# ============================================================
+target_include_directories(libgo_core
+    PUBLIC
+    "${CMAKE_CURRENT_BINARY_DIR}/libgo/common"
+    "${libgo_SOURCE_DIR}/libgo"
+)
+
+
+if(WIN32)
+    target_include_directories(libgo_core
+        PRIVATE "${libgo_SOURCE_DIR}/libgo/netio/windows"
+    )
+    target_compile_definitions(libgo_core PRIVATE
+        _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX
+    )
+    target_compile_options(libgo_core PRIVATE /W0 /EHsc /wd4819 /wd4267)
+    target_link_libraries(libgo_core PUBLIC ws2_32)
+elseif(UNIX)
+    find_package(Threads REQUIRED)
+    target_link_libraries(libgo_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+    target_compile_options(libgo_core PRIVATE -fPIC -fno-strict-aliasing -Wall -D__const__=)
+endif()
+
+# ============================================================
+# 7. 安装规则
+# ============================================================
+install(TARGETS libgo_core EXPORT libgoTargets ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
+install(DIRECTORY "${libgo_SOURCE_DIR}/libgo/" DESTINATION include/libgo FILES_MATCHING PATTERN "*.h")
+install(FILES "${_cmake_config_output}" DESTINATION include/libgo/common)
