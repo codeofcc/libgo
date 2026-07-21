@@ -66,8 +66,9 @@ endif()
 # ============================================================
 if(WIN32)
     file(GLOB LIBGO_NETIO_WIN_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/windows/*.cpp")
+    file(GLOB LIBGO_CONTEXT_SOURCES "${libgo_SOURCE_DIR}/libgo/context/*.cpp")
     file(GLOB LIBGO_FIBER_SOURCES "${libgo_SOURCE_DIR}/libgo/context/fiber/*.cpp")
-    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_NETIO_WIN_SOURCES} ${LIBGO_FIBER_SOURCES})
+    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_NETIO_WIN_SOURCES} ${LIBGO_CONTEXT_SOURCES} ${LIBGO_FIBER_SOURCES})
 
     if(NOT LIBGO_DISABLE_HOOK)
         list(APPEND LIBGO_ALL_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/windows/xhook/xhook.cpp")
@@ -117,8 +118,10 @@ target_compile_definitions(libgo_core PRIVATE
 # ============================================================
 target_include_directories(libgo_core
     PUBLIC
-    "${CMAKE_CURRENT_BINARY_DIR}/libgo/common"
-    "${libgo_SOURCE_DIR}/libgo"
+    # "${CMAKE_CURRENT_BINARY_DIR}/libgo/common"
+    # "${libgo_SOURCE_DIR}/libgo"
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/libgo/common>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/libgo>
 )
 
 
@@ -140,6 +143,6 @@ endif()
 # ============================================================
 # 7. 安装规则
 # ============================================================
-install(TARGETS libgo_core EXPORT libgoTargets ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
-install(DIRECTORY "${libgo_SOURCE_DIR}/libgo/" DESTINATION include/libgo FILES_MATCHING PATTERN "*.h")
-install(FILES "${_cmake_config_output}" DESTINATION include/libgo/common)
+# install(TARGETS libgo_core EXPORT libgoTargets ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
+# install(DIRECTORY "${libgo_SOURCE_DIR}/libgo/" DESTINATION include/libgo FILES_MATCHING PATTERN "*.h")
+# install(FILES "${_cmake_config_output}" DESTINATION include/libgo/common)
