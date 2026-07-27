@@ -18,19 +18,27 @@ option(LIBGO_ENABLE_DEBUGGER "Enable libgo debugger" OFF)
 option(LIBGO_DISABLE_HOOK "Disable hook (use disable_hook netio)" OFF)
 
 # ============================================================
-# 1. 准备配置头文件路径（仅定义变量，不操作 target）
+# 1. 准备配置头文件路径
 # ============================================================
+# 定义 configure_file 需要的变量
+set(ENABLE_DEBUGGER ${LIBGO_ENABLE_DEBUGGER})
+if(LIBGO_DISABLE_HOOK)
+    set(ENABLE_HOOK OFF)
+else()
+    set(ENABLE_HOOK ON)
+endif()
+
 set(_cmake_config_output "${CMAKE_CURRENT_BINARY_DIR}/libgo/common/cmake_config.h")
 
-# 先生成头文件（这步可以在 add_library 之前）
 configure_file(
     "${libgo_SOURCE_DIR}/libgo/common/cmake_config.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/libgo/common/cmake_config.h"
     @ONLY
 )
 message(STATUS "CMAKE_CURRENT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}")
+
 # ============================================================
-# 2. 收集源文件（保持原有逻辑不变）
+# 2. 收集源文件
 # ============================================================
 file(GLOB LIBGO_COMMON_SOURCES "${libgo_SOURCE_DIR}/libgo/common/*.cpp")
 file(GLOB LIBGO_COROUTINE_SOURCES "${libgo_SOURCE_DIR}/libgo/coroutine/*.cpp")
@@ -61,10 +69,16 @@ if(LIBGO_ENABLE_DEBUGGER)
     list(APPEND LIBGO_ALL_SOURCES ${LIBGO_DEBUGGER_SOURCES})
 endif()
 
+
+
+
 # ============================================================
 # 3. 平台特定源文件
 # ============================================================
 if(WIN32)
+    # ============================================================
+    # Windows 平台 - 使用内置 context
+    # ============================================================
     file(GLOB LIBGO_NETIO_WIN_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/windows/*.cpp")
     file(GLOB LIBGO_CONTEXT_SOURCES "${libgo_SOURCE_DIR}/libgo/context/*.cpp")
     file(GLOB LIBGO_FIBER_SOURCES "${libgo_SOURCE_DIR}/libgo/context/fiber/*.cpp")
@@ -76,38 +90,86 @@ if(WIN32)
         file(GLOB LIBGO_DISABLE_HOOK_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/disable_hook/*.cpp")
         list(APPEND LIBGO_ALL_SOURCES ${LIBGO_DISABLE_HOOK_SOURCES})
     endif()
-elseif(UNIX)
-    if(NOT LIBGO_DISABLE_HOOK)
-        file(GLOB_RECURSE LIBGO_PLATFORM_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/unix/*.cpp")
-    else()
-        file(GLOB LIBGO_PLATFORM_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/disable_hook/*.cpp")
-    endif()
-    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_PLATFORM_SOURCES})
 
-    execute_process(
-        COMMAND bash "${libgo_SOURCE_DIR}/third_party/select_asm.sh" "${libgo_SOURCE_DIR}" "jump"
-        OUTPUT_VARIABLE LIBGO_JUMP_ASM OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE ASM_SELECT_RESULT
+elseif(UNIX)
+    # ============================================================
+    # Linux/Unix 平台 - 使用 Boost.Context (FetchContent)
+    # ============================================================
+    message(STATUS "libgo: Using Boost.Context for context switching (FetchContent)")
+
+    include(FetchContent)
+
+    # ============================================================
+    # Boost 配置（写死，易于修改）
+    # ============================================================
+    set(BOOST_VERSION "boost-1.91.0")
+    set(BOOST_REPOSITORY "https://github.com/boostorg/boost.git")
+
+    message(STATUS "libgo: Downloading Boost ${BOOST_VERSION} from ${BOOST_REPOSITORY}")
+
+    # 下载完整 Boost
+    FetchContent_Declare(
+        boost
+        GIT_REPOSITORY ${BOOST_REPOSITORY}
+        GIT_TAG ${BOOST_VERSION}
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS TRUE
+        SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/boost-src"
+        USES_TERMINAL_DOWNLOAD TRUE
     )
-    execute_process(
-        COMMAND bash "${libgo_SOURCE_DIR}/third_party/select_asm.sh" "${libgo_SOURCE_DIR}" "make"
-        OUTPUT_VARIABLE LIBGO_MAKE_ASM OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(NOT ASM_SELECT_RESULT EQUAL 0)
-        message(FATAL_ERROR "[libgo] select_asm.sh failed with code ${ASM_SELECT_RESULT}")
+
+    FetchContent_GetProperties(boost)
+    if(NOT boost_POPULATED)
+        FetchContent_Populate(boost)
+        message(STATUS "Boost downloaded to: ${boost_SOURCE_DIR}")
     endif()
-    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_JUMP_ASM} ${LIBGO_MAKE_ASM})
+
+    # 设置 Boost 根目录
+    set(BOOST_ROOT "${boost_SOURCE_DIR}" CACHE PATH "Boost root" FORCE)
+
+    # 配置 Boost 构建选项 - 只构建 context 库
+    set(BUILD_SHARED_LIBS OFF)
+    set(BOOST_INCLUDE_LIBRARIES context)
+    set(BOOST_BUILD_STATIC_LIBS ON)
+    set(Boost_USE_STATIC_LIBS ON)
+
+    # 添加 Boost 的 CMake 支持 (Boost 1.70+)
+    if(EXISTS "${boost_SOURCE_DIR}/CMakeLists.txt")
+        add_subdirectory("${boost_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_deps/boost-build")
+
+        if(TARGET Boost::context)
+            set(BOOST_CONTEXT_FOUND TRUE)
+            set(BOOST_CONTEXT_TARGET Boost::context)
+            message(STATUS "libgo: Boost.Context built successfully")
+        else()
+            message(FATAL_ERROR "libgo: Failed to build Boost.Context")
+        endif()
+    else()
+        message(FATAL_ERROR "libgo: Boost version ${BOOST_VERSION} does not support CMake (need 1.70+)")
+    endif()
+
+    # 不再需要 select_asm.sh，因为使用 Boost 的 CMake 构建
+    # 注释掉原来的汇编文件选择逻辑
+    # execute_process(
+    #     COMMAND bash "${libgo_SOURCE_DIR}/third_party/select_asm.sh" "${libgo_SOURCE_DIR}" "jump"
+    #     ...
+    # )
 endif()
 
 # ============================================================
-# 4. 创建 Target ⬅️ 必须在这里先创建
+# 4. 创建 Target
 # ============================================================
 add_library(libgo_core STATIC ${LIBGO_ALL_SOURCES})
 add_library(libgo::libgo ALIAS libgo_core)
-
+# if(UNIX)
+#     # 强制取消 __has_attribute 的宏定义
+#     target_compile_definitions(libgo_core PRIVATE
+#         -U__has_attribute
+#     )
+# endif()
 # ============================================================
-# 5. 设置编译定义 ⬅️ 移到 add_library 之后
+# 5. 设置编译定义
 # ============================================================
-# 将绝对路径作为字符串传给编译器
 string(REPLACE "/" "\\\\" _cmake_config_output_escaped "${_cmake_config_output}")
 target_compile_definitions(libgo_core PRIVATE
     LIBGO_CMAKE_CONFIG_H_PATH="${_cmake_config_output_escaped}"
@@ -118,14 +180,14 @@ target_compile_definitions(libgo_core PRIVATE
 # ============================================================
 target_include_directories(libgo_core
     PUBLIC
-    # "${CMAKE_CURRENT_BINARY_DIR}/libgo/common"
-    # "${libgo_SOURCE_DIR}/libgo"
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/libgo/common>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/libgo>
 )
 
-
 if(WIN32)
+    # ============================================================
+    # Windows 编译选项
+    # ============================================================
     target_include_directories(libgo_core
         PRIVATE "${libgo_SOURCE_DIR}/libgo/netio/windows"
     )
@@ -134,10 +196,31 @@ if(WIN32)
     )
     target_compile_options(libgo_core PRIVATE /W0 /EHsc /wd4819 /wd4267)
     target_link_libraries(libgo_core PUBLIC ws2_32)
+
 elseif(UNIX)
+    # ============================================================
+    # Linux/Unix 编译选项
+    # ============================================================
     find_package(Threads REQUIRED)
     target_link_libraries(libgo_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
-    target_compile_options(libgo_core PRIVATE -fPIC -fno-strict-aliasing -Wall -D__const__=)
+    # target_compile_options(libgo_core PRIVATE -fPIC -fno-strict-aliasing -Wall )
+
+    # ============================================================
+    # 链接 Boost.Context
+    # ============================================================
+    if(TARGET Boost::context)
+        target_link_libraries(libgo_core PUBLIC Boost::context)
+        target_compile_definitions(libgo_core PUBLIC -DLIBGO_USE_BOOST_CONTEXT=1)
+
+        # 添加汇编相关的编译选项
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+            target_compile_options(libgo_core PRIVATE -Wa,--noexecstack)
+        endif()
+
+        message(STATUS "libgo: Boost.Context linked successfully")
+    else()
+        message(FATAL_ERROR "libgo: Boost::context target not found")
+    endif()
 endif()
 
 # ============================================================

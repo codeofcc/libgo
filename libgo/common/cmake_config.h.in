@@ -1,6 +1,5 @@
+// libgo/common/cmake_config.h.in
 #pragma once
 
-#define ENABLE_DEBUGGER ${ENABLE_DEBUGGER}
-
-#define ENABLE_HOOK ${ENABLE_HOOK}
-
+#define ENABLE_DEBUGGER @ENABLE_DEBUGGER@
+#define ENABLE_HOOK @ENABLE_HOOK@
