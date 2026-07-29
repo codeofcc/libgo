@@ -20,6 +20,7 @@ option(LIBGO_DISABLE_HOOK "Disable hook (use disable_hook netio)" OFF)
 # ============================================================
 # 1. 准备配置头文件路径
 # ============================================================
+# 定义 configure_file 需要的变量
 set(ENABLE_DEBUGGER ${LIBGO_ENABLE_DEBUGGER})
 if(LIBGO_DISABLE_HOOK)
     set(ENABLE_HOOK OFF)
@@ -31,7 +32,7 @@ set(_cmake_config_output "${CMAKE_CURRENT_BINARY_DIR}/libgo/common/cmake_config.
 
 configure_file(
     "${libgo_SOURCE_DIR}/libgo/common/cmake_config.h.in"
-    "${_cmake_config_output}"
+    "${CMAKE_CURRENT_BINARY_DIR}/libgo/common/cmake_config.h"
     @ONLY
 )
 message(STATUS "CMAKE_CURRENT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}")
@@ -51,7 +52,6 @@ file(GLOB LIBGO_DEFER_SOURCES "${libgo_SOURCE_DIR}/libgo/defer/*.cpp")
 file(GLOB LIBGO_POOL_SOURCES "${libgo_SOURCE_DIR}/libgo/pool/*.cpp")
 file(GLOB LIBGO_DEBUG_SOURCES "${libgo_SOURCE_DIR}/libgo/debug/*.cpp")
 file(GLOB LIBGO_CONTEXT_SOURCES "${libgo_SOURCE_DIR}/libgo/context/*.cpp")
-
 set(LIBGO_ALL_SOURCES
     ${LIBGO_COMMON_SOURCES}
     ${LIBGO_COROUTINE_SOURCES}
@@ -70,12 +70,18 @@ if(LIBGO_ENABLE_DEBUGGER)
     list(APPEND LIBGO_ALL_SOURCES ${LIBGO_DEBUGGER_SOURCES})
 endif()
 
+
+
+
 # ============================================================
-# 3. 平台特定源文件 & 依赖
+# 3. 平台特定源文件
 # ============================================================
 if(WIN32)
-    # Windows 平台 - 使用内置 fiber context
+    # ============================================================
+    # Windows 平台 - 使用内置 context
+    # ============================================================
     file(GLOB LIBGO_NETIO_WIN_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/windows/*.cpp")
+
     file(GLOB LIBGO_FIBER_SOURCES "${libgo_SOURCE_DIR}/libgo/context/fiber/*.cpp")
     list(APPEND LIBGO_ALL_SOURCES ${LIBGO_NETIO_WIN_SOURCES} ${LIBGO_FIBER_SOURCES})
 
@@ -92,187 +98,63 @@ elseif(UNIX)
     # ============================================================
     message(STATUS "libgo: Using Boost.Context for context switching (FetchContent)")
 
-    # 架构映射
-    set(_detected_arch "${CMAKE_SYSTEM_PROCESSOR}")
-    string(TOLOWER "${_detected_arch}" _lower_arch)
-
-    if(_lower_arch MATCHES "aarch64|arm64")
-        set(_boost_arch "arm64")
-        set(_boost_abi "aapcs")
-    elseif(_lower_arch MATCHES "armv7|armhf|armv6|arm")
-        set(_boost_arch "arm")
-        set(_boost_abi "aapcs")
-    elseif(_lower_arch MATCHES "x86_64|amd64")
-        set(_boost_arch "x86_64")
-        set(_boost_abi "sysv")
-    elseif(_lower_arch MATCHES "i[3-6]86|x86")
-        set(_boost_arch "x86")
-        set(_boost_abi "sysv")
-    elseif(_lower_arch MATCHES "riscv64")
-        set(_boost_arch "riscv64")
-        set(_boost_abi "sysv")
-    elseif(_lower_arch MATCHES "mips64")
-        set(_boost_arch "mips64")
-        set(_boost_abi "o32")
-    elseif(_lower_arch MATCHES "mips")
-        set(_boost_arch "mips32")
-        set(_boost_abi "o32")
-    else()
-        message(WARNING "libgo: Unknown architecture '${_detected_arch}', falling back to Boost auto-detection")
-        set(_boost_arch "")
-    endif()
-
     include(FetchContent)
 
-    # 下载 Boost.Context 源码
-    set(BOOST_CONTEXT_REPOSITORY "https://github.com/boostorg/context.git")
-    set(BOOST_CONTEXT_TAG "boost-1.91.0")
-    
-    message(STATUS "libgo: Downloading Boost.Context from ${BOOST_CONTEXT_REPOSITORY}")
-    
+    # ============================================================
+    # Boost 配置（写死，易于修改）
+    # ============================================================
+    set(BOOST_VERSION "1.90.0")
+    # set(BOOST_VERSION_UNDERSCORE "1_91_0")
+    # https://github.com/boostorg/boost/releases/download/boost-1.91.0-1/boost-1.91.0-1-cmake.tar.gz
+    # Boost 官方压缩包 URL
+    set(BOOST_URL "https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/boost-${BOOST_VERSION}-cmake.tar.gz")
+
+    message(STATUS "libgo: Downloading Boost ${BOOST_VERSION} from ${BOOST_URL}")
+
+    # 下载压缩包
     FetchContent_Declare(
-        boost_context
-        GIT_REPOSITORY ${BOOST_CONTEXT_REPOSITORY}
-        GIT_TAG ${BOOST_CONTEXT_TAG}
-        GIT_SHALLOW TRUE
-        GIT_PROGRESS TRUE
-        SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/boost-context-src"
-        BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/boost-context-build"
+        boost
+        URL ${BOOST_URL}
+        SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/boost-src"
         USES_TERMINAL_DOWNLOAD TRUE
     )
 
-    FetchContent_GetProperties(boost_context)
-    if(NOT boost_context_POPULATED)
-        FetchContent_Populate(boost_context)
-        message(STATUS "Boost.Context downloaded to: ${boost_context_SOURCE_DIR}")
+    FetchContent_GetProperties(boost)
+    if(NOT boost_POPULATED)
+        FetchContent_Populate(boost)
+        message(STATUS "Boost downloaded to: ${boost_SOURCE_DIR}")
     endif()
 
-    # 调试：列出实际的目录结构
-    file(GLOB BOOST_CONTEXT_SRC_CONTENTS "${boost_context_SOURCE_DIR}/src/*")
-    message(STATUS "Boost.Context src contents: ${BOOST_CONTEXT_SRC_CONTENTS}")
+    # 设置 Boost 根目录
+    set(BOOST_ROOT "${boost_SOURCE_DIR}" CACHE PATH "Boost root" FORCE)
 
-    # 收集 Boost.Context 源文件（排除 untested.cpp）
-    file(GLOB BOOST_CONTEXT_SOURCES 
-        "${boost_context_SOURCE_DIR}/src/*.cpp"
-        "${boost_context_SOURCE_DIR}/src/*.c"
-    )
-    
-    # 移除 untested.cpp
-    list(FILTER BOOST_CONTEXT_SOURCES EXCLUDE REGEX "untested\\.cpp$")
-    
-    # 根据架构添加对应的汇编文件 - 检查多种可能的位置
-    if(_boost_arch)
-        # 可能的汇编文件位置
-        set(possible_asm_dirs
-            "${boost_context_SOURCE_DIR}/src/${_boost_arch}"
-            "${boost_context_SOURCE_DIR}/src/asm/${_boost_arch}"
-            "${boost_context_SOURCE_DIR}/src/arch/${_boost_arch}"
-            "${boost_context_SOURCE_DIR}/src/${_boost_abi}/${_boost_arch}"
-        )
-        
-        set(asm_found FALSE)
-        foreach(asm_dir ${possible_asm_dirs})
-            if(EXISTS "${asm_dir}")
-                message(STATUS "libgo: Found assembly directory: ${asm_dir}")
-                
-                # 收集汇编文件
-                file(GLOB BOOST_CONTEXT_ASM_SOURCES 
-                    "${asm_dir}/*.S" 
-                    "${asm_dir}/*.s" 
-                    "${asm_dir}/*.asm"
-                    "${asm_dir}/make_${_boost_arch}_sysv_elf_gas.S"
-                    "${asm_dir}/jump_${_boost_arch}_sysv_elf_gas.S"
-                    "${asm_dir}/ontop_${_boost_arch}_sysv_elf_gas.S"
-                )
-                
-                if(BOOST_CONTEXT_ASM_SOURCES)
-                    list(APPEND BOOST_CONTEXT_SOURCES ${BOOST_CONTEXT_ASM_SOURCES})
-                    set(asm_found TRUE)
-                    message(STATUS "libgo: Found assembly files: ${BOOST_CONTEXT_ASM_SOURCES}")
-                    break()
-                endif()
-            endif()
-        endforeach()
-        
-        if(NOT asm_found)
-            message(WARNING "libgo: No assembly files found for architecture ${_boost_arch}")
-            # 尝试查找通用的汇编文件
-            file(GLOB BOOST_CONTEXT_ASM_SOURCES "${boost_context_SOURCE_DIR}/src/*.S")
-            if(BOOST_CONTEXT_ASM_SOURCES)
-                list(APPEND BOOST_CONTEXT_SOURCES ${BOOST_CONTEXT_ASM_SOURCES})
-                message(STATUS "libgo: Using generic assembly files: ${BOOST_CONTEXT_ASM_SOURCES}")
-            endif()
+    # 配置 Boost 构建选项 - 只构建 context 库
+    set(BUILD_SHARED_LIBS OFF)
+    set(BOOST_INCLUDE_LIBRARIES context)
+    set(BOOST_BUILD_STATIC_LIBS ON)
+    set(Boost_USE_STATIC_LIBS ON)
+
+    # 添加 Boost 的 CMake 支持 (Boost 1.70+)
+    if(EXISTS "${boost_SOURCE_DIR}/CMakeLists.txt")
+        add_subdirectory("${boost_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_deps/boost-build")
+
+        if(TARGET Boost::context)
+            set(BOOST_CONTEXT_FOUND TRUE)
+            set(BOOST_CONTEXT_TARGET Boost::context)
+            message(STATUS "libgo: Boost.Context built successfully")
+        else()
+            message(FATAL_ERROR "libgo: Failed to build Boost.Context")
         endif()
+    else()
+        message(FATAL_ERROR "libgo: Boost version ${BOOST_VERSION} does not support CMake (need 1.70+)")
     endif()
 
-    if(NOT BOOST_CONTEXT_SOURCES)
-        message(FATAL_ERROR "libgo: No Boost.Context source files found")
-    endif()
-
-    # 创建 Boost.Context 静态库
-    add_library(boost_context STATIC ${BOOST_CONTEXT_SOURCES})
-    add_library(Boost::context ALIAS boost_context)
-
-    # 设置 include 目录
-    target_include_directories(boost_context
-        PUBLIC
-        $<BUILD_INTERFACE:${boost_context_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-        PRIVATE
-        ${boost_context_SOURCE_DIR}/src
-        ${boost_context_SOURCE_DIR}/include
-    )
-
-    # 添加所有的 src 子目录到 include 路径
-    file(GLOB BOOST_CONTEXT_SUBDIRS "${boost_context_SOURCE_DIR}/src/*")
-    foreach(subdir ${BOOST_CONTEXT_SUBDIRS})
-        if(IS_DIRECTORY "${subdir}")
-            target_include_directories(boost_context PRIVATE "${subdir}")
-        endif()
-    endforeach()
-
-    # 设置编译定义
-    target_compile_definitions(boost_context
-        PRIVATE
-        -DBOOST_CONTEXT_DYN_LINK=1
-        -DBOOST_CONTEXT_SOURCE=1
-        -DBOOST_ALL_NO_LIB=1
-        -DBOOST_CONTEXT_DECL=
-        -DBOOST_CONTEXT_EXPORT=
-        -DBOOST_CONTEXT_IMPORT=
-        -D_GNU_SOURCE
-        -D_REENTRANT
-        -DBOOST_USE_UCONTEXT=1
-    )
-
-    # 根据架构设置特定的宏
-    if(_lower_arch MATCHES "x86_64|amd64")
-        target_compile_definitions(boost_context PRIVATE -DBOOST_CONTEXT_ASM_X86_64)
-        target_compile_options(boost_context PRIVATE -Wa,--noexecstack)
-    elseif(_lower_arch MATCHES "i[3-6]86|x86")
-        target_compile_definitions(boost_context PRIVATE -DBOOST_CONTEXT_ASM_X86)
-        target_compile_options(boost_context PRIVATE -Wa,--noexecstack)
-    elseif(_lower_arch MATCHES "aarch64|arm64")
-        target_compile_definitions(boost_context PRIVATE -DBOOST_CONTEXT_ASM_ARM64)
-    elseif(_lower_arch MATCHES "arm")
-        target_compile_definitions(boost_context PRIVATE -DBOOST_CONTEXT_ASM_ARM)
-    elseif(_lower_arch MATCHES "riscv64")
-        target_compile_definitions(boost_context PRIVATE -DBOOST_CONTEXT_ASM_RISCV64)
-    endif()
-
-    # 启用 C++14 标准
-    set_target_properties(boost_context PROPERTIES
-        CXX_STANDARD 14
-        CXX_STANDARD_REQUIRED ON
-        POSITION_INDEPENDENT_CODE ON
-    )
-
-    set(BOOST_CONTEXT_FOUND TRUE)
-    set(BOOST_CONTEXT_TARGET Boost::context)
-    message(STATUS "libgo: Boost.Context built successfully with ${_boost_arch} architecture")
-
-    unset(BOOST_CONTEXT_SOURCES)
-    unset(BOOST_CONTEXT_ASM_SOURCES)
+    # 不再需要 select_asm.sh，因为使用 Boost 的 CMake 构建
+    # 注释掉原来的汇编文件选择逻辑
+    # execute_process(
+    #     COMMAND bash "${libgo_SOURCE_DIR}/third_party/select_asm.sh" "${libgo_SOURCE_DIR}" "jump"
+    #     ...
+    # )
 endif()
 
 # ============================================================
@@ -280,7 +162,12 @@ endif()
 # ============================================================
 add_library(libgo_core STATIC ${LIBGO_ALL_SOURCES})
 add_library(libgo::libgo ALIAS libgo_core)
-
+# if(UNIX)
+#     # 强制取消 __has_attribute 的宏定义
+#     target_compile_definitions(libgo_core PRIVATE
+#         -U__has_attribute
+#     )
+# endif()
 # ============================================================
 # 5. 设置编译定义
 # ============================================================
@@ -299,7 +186,12 @@ target_include_directories(libgo_core
 )
 
 if(WIN32)
-    target_include_directories(libgo_core PRIVATE "${libgo_SOURCE_DIR}/libgo/netio/windows")
+    # ============================================================
+    # Windows 编译选项
+    # ============================================================
+    target_include_directories(libgo_core
+        PRIVATE "${libgo_SOURCE_DIR}/libgo/netio/windows"
+    )
     target_compile_definitions(libgo_core PRIVATE
         _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX
     )
@@ -307,33 +199,33 @@ if(WIN32)
     target_link_libraries(libgo_core PUBLIC ws2_32)
 
 elseif(UNIX)
-    if(CMAKE_CROSSCOMPILING)
-        set(CMAKE_THREAD_LIBS_INIT "-lpthread" CACHE STRING "" FORCE)
-        set(CMAKE_HAVE_THREADS_LIBRARY 1 CACHE BOOL "" FORCE)
-        set(CMAKE_USE_PTHREADS_INIT 1 CACHE BOOL "" FORCE)
-        set(THREADS_PREFER_PTHREAD_FLAG ON CACHE BOOL "" FORCE)
-    endif()
-
+    # ============================================================
+    # Linux/Unix 编译选项
+    # ============================================================
     find_package(Threads REQUIRED)
     target_link_libraries(libgo_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
     target_compile_options(libgo_core PRIVATE -fPIC -fno-strict-aliasing -Wall)
 
+    # ============================================================
+    # 链接 Boost.Context
+    # ============================================================
     if(TARGET Boost::context)
         target_link_libraries(libgo_core PUBLIC Boost::context)
         target_compile_definitions(libgo_core PUBLIC -DLIBGO_USE_BOOST_CONTEXT=1)
 
-        if(_lower_arch MATCHES "x86_64|amd64|i[3-6]86|x86")
+        # 添加汇编相关的编译选项
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
             target_compile_options(libgo_core PRIVATE -Wa,--noexecstack)
         endif()
 
-        message(STATUS "libgo: Boost.Context linked successfully for ${_detected_arch}")
+        message(STATUS "libgo: Boost.Context linked successfully")
     else()
         message(FATAL_ERROR "libgo: Boost::context target not found")
     endif()
 endif()
 
 # ============================================================
-# 7. 安装规则（按需启用）
+# 7. 安装规则
 # ============================================================
 # install(TARGETS libgo_core EXPORT libgoTargets ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
 # install(DIRECTORY "${libgo_SOURCE_DIR}/libgo/" DESTINATION include/libgo FILES_MATCHING PATTERN "*.h")
