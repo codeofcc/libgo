@@ -202,6 +202,23 @@ elseif(UNIX)
     # ============================================================
     # Linux/Unix 编译选项
     # ============================================================
+
+    # ============================================================
+    # 静态链接专用配置
+    # ============================================================
+    if(BUILD_SHARED_LIBS STREQUAL "OFF" OR CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
+        # 强制 FindThreads 使用正确的静态链接参数
+        # glibc 2.31 静态链接要求: -lpthread -lc -lgcc_eh
+        SET(CMAKE_THREAD_LIBS_INIT "-lpthread -lc -lgcc_eh" CACHE STRING "" FORCE)
+        SET(CMAKE_HAVE_THREADS_LIBRARY 1 CACHE BOOL "" FORCE)
+        SET(CMAKE_USE_PTHREADS_INIT 1 CACHE BOOL "" FORCE)
+        SET(THREADS_FOUND TRUE CACHE BOOL "" FORCE)
+
+        # 确保链接器搜索静态库时优先找到完整组合
+        SET(CMAKE_EXE_LINKER_FLAGS_INIT "${CMAKE_EXE_LINKER_FLAGS_INIT} -static -Wl,--start-group -lpthread -lc -lgcc_eh -Wl,--end-group" CACHE STRING "" FORCE)
+    endif()
+
+
     find_package(Threads REQUIRED)
     target_link_libraries(libgo_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
     target_compile_options(libgo_core PRIVATE -fPIC -fno-strict-aliasing -Wall)
