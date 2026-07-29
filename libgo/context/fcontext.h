@@ -23,8 +23,8 @@ struct StackTraits
 //using boost::context::jump_fcontext;
 //using boost::context::make_fcontext;
 
-extern "C"
-{
+// extern "C"
+// {
 
 typedef void* fcontext_t;
 typedef void (FCONTEXT_CALL *fn_t)(intptr_t);
@@ -34,4 +34,4 @@ intptr_t libgo_jump_fcontext(fcontext_t * ofc, fcontext_t nfc,
 
 fcontext_t libgo_make_fcontext(void* stack, std::size_t size, fn_t fn);
 
-} // extern "C"
+// } // extern "C"

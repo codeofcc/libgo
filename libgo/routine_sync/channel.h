@@ -474,21 +474,21 @@ private:
 template <
     typename QueueT
 >
-class ChannelImpl<nullptr_t, QueueT> : public ChannelImplWithSignal<nullptr_t>
+class ChannelImpl<std::nullptr_t, QueueT> : public ChannelImplWithSignal<std::nullptr_t>
 {
 public:
-    using ChannelImplWithSignal<nullptr_t>::mtx_;
-    using ChannelImplWithSignal<nullptr_t>::pushCv_;
-    using ChannelImplWithSignal<nullptr_t>::popCv_;
-    using ChannelImplWithSignal<nullptr_t>::closed_;
-    using ChannelImplWithSignal<nullptr_t>::pushQ_;
-    using ChannelImplWithSignal<nullptr_t>::popQ_;
-    using ChannelImplWithSignal<nullptr_t>::popWaiting_;
-    using ChannelImplWithSignal<nullptr_t>::pushWaiting_;
-    using ChannelImplWithSignal<nullptr_t>::pop_impl_with_signal;
-    using ChannelImplWithSignal<nullptr_t>::push_impl_with_signal;
-    using ChannelImplWithSignal<nullptr_t>::id;
-    using ChannelImplWithSignal<nullptr_t>::impl_with_signal_close;
+    using ChannelImplWithSignal<std::nullptr_t>::mtx_;
+    using ChannelImplWithSignal<std::nullptr_t>::pushCv_;
+    using ChannelImplWithSignal<std::nullptr_t>::popCv_;
+    using ChannelImplWithSignal<std::nullptr_t>::closed_;
+    using ChannelImplWithSignal<std::nullptr_t>::pushQ_;
+    using ChannelImplWithSignal<std::nullptr_t>::popQ_;
+    using ChannelImplWithSignal<std::nullptr_t>::popWaiting_;
+    using ChannelImplWithSignal<std::nullptr_t>::pushWaiting_;
+    using ChannelImplWithSignal<std::nullptr_t>::pop_impl_with_signal;
+    using ChannelImplWithSignal<std::nullptr_t>::push_impl_with_signal;
+    using ChannelImplWithSignal<std::nullptr_t>::id;
+    using ChannelImplWithSignal<std::nullptr_t>::impl_with_signal_close;
 
     explicit ChannelImpl(std::size_t capacity = 0)
         : cap_(capacity), count_(0)
@@ -496,7 +496,7 @@ public:
     }
 
     template<typename _Clock, typename _Duration>
-    bool push(nullptr_t const& t, bool isWait,
+    bool push(std::nullptr_t const& t, bool isWait,
             const std::chrono::time_point<_Clock, _Duration>* abstime)
     {
         if (cap_) {
@@ -507,7 +507,7 @@ public:
     }
 
     template<typename _Clock, typename _Duration>
-    bool pop(nullptr_t & t, bool isWait,
+    bool pop(std::nullptr_t & t, bool isWait,
             const std::chrono::time_point<_Clock, _Duration>* abstime)
     {
         if (cap_) {
@@ -557,7 +557,7 @@ public:
 
 private:
     template<typename _Clock, typename _Duration>
-    bool push_impl_with_cap(nullptr_t const& t, bool isWait,
+    bool push_impl_with_cap(std::nullptr_t const& t, bool isWait,
             const std::chrono::time_point<_Clock, _Duration>* abstime)
     {
         std::unique_lock<Mutex> lock(mtx_);
@@ -611,7 +611,7 @@ private:
     }
 
     template<typename _Clock, typename _Duration>
-    bool pop_impl_with_cap(nullptr_t & t, bool isWait,
+    bool pop_impl_with_cap(std::nullptr_t & t, bool isWait,
             const std::chrono::time_point<_Clock, _Duration>* abstime)
     {
         std::unique_lock<Mutex> lock(mtx_);

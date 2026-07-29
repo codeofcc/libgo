@@ -51,7 +51,7 @@ file(GLOB LIBGO_CLS_SOURCES "${libgo_SOURCE_DIR}/libgo/cls/*.cpp")
 file(GLOB LIBGO_DEFER_SOURCES "${libgo_SOURCE_DIR}/libgo/defer/*.cpp")
 file(GLOB LIBGO_POOL_SOURCES "${libgo_SOURCE_DIR}/libgo/pool/*.cpp")
 file(GLOB LIBGO_DEBUG_SOURCES "${libgo_SOURCE_DIR}/libgo/debug/*.cpp")
-
+file(GLOB LIBGO_CONTEXT_SOURCES "${libgo_SOURCE_DIR}/libgo/context/*.cpp")
 set(LIBGO_ALL_SOURCES
     ${LIBGO_COMMON_SOURCES}
     ${LIBGO_COROUTINE_SOURCES}
@@ -63,6 +63,7 @@ set(LIBGO_ALL_SOURCES
     ${LIBGO_DEFER_SOURCES}
     ${LIBGO_POOL_SOURCES}
     ${LIBGO_DEBUG_SOURCES}
+    ${LIBGO_CONTEXT_SOURCES}
 )
 
 if(LIBGO_ENABLE_DEBUGGER)
@@ -80,9 +81,9 @@ if(WIN32)
     # Windows 平台 - 使用内置 context
     # ============================================================
     file(GLOB LIBGO_NETIO_WIN_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/windows/*.cpp")
-    file(GLOB LIBGO_CONTEXT_SOURCES "${libgo_SOURCE_DIR}/libgo/context/*.cpp")
+
     file(GLOB LIBGO_FIBER_SOURCES "${libgo_SOURCE_DIR}/libgo/context/fiber/*.cpp")
-    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_NETIO_WIN_SOURCES} ${LIBGO_CONTEXT_SOURCES} ${LIBGO_FIBER_SOURCES})
+    list(APPEND LIBGO_ALL_SOURCES ${LIBGO_NETIO_WIN_SOURCES} ${LIBGO_FIBER_SOURCES})
 
     if(NOT LIBGO_DISABLE_HOOK)
         list(APPEND LIBGO_ALL_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/windows/xhook/xhook.cpp")
@@ -203,7 +204,7 @@ elseif(UNIX)
     # ============================================================
     find_package(Threads REQUIRED)
     target_link_libraries(libgo_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
-    # target_compile_options(libgo_core PRIVATE -fPIC -fno-strict-aliasing -Wall )
+    target_compile_options(libgo_core PRIVATE -fPIC -fno-strict-aliasing -Wall)
 
     # ============================================================
     # 链接 Boost.Context
