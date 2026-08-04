@@ -110,12 +110,12 @@ elseif(UNIX)
     set(BOOST_URL "https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/boost-${BOOST_VERSION}-cmake.tar.gz")
 
     message(STATUS "libgo: Downloading Boost ${BOOST_VERSION} from ${BOOST_URL}")
-
+    set(PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../_deps")
     # 下载压缩包
     FetchContent_Declare(
         boost
         URL ${BOOST_URL}
-        SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/boost-src"
+        SOURCE_DIR "${PACKAGE_DIR}/boost-src"
         USES_TERMINAL_DOWNLOAD TRUE
     )
 
