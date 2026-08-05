@@ -1,3 +1,7 @@
+
+# cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain.cmake -DCMAKE_BUILD_TYPE=Release ..
+
+
 SET(CMAKE_SYSTEM_NAME Linux CACHE STRING "toolchain default")
 SET(CMAKE_SYSTEM_PROCESSOR aarch64 CACHE STRING "toolchain default")
 
@@ -5,7 +9,7 @@ SET(CMAKE_SYSTEM_PROCESSOR aarch64 CACHE STRING "toolchain default")
 # Clang 交叉编译核心配置
 # ============================================================
 SET(CLANG_TARGET "aarch64-linux-gnu")
-SET(CMAKE_SYSROOT /home/yanfa/ubuntu20-arm64-sysroot CACHE STRING "toolchain default")
+SET(CMAKE_SYSROOT /home/yanfa/ubuntu21-arm64-sysroot CACHE STRING "toolchain default")
 
 # 编译器设置（必须带 --target）
 SET(CMAKE_C_COMPILER /usr/bin/clang CACHE STRING "toolchain default")

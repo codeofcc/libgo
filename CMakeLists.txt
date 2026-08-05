@@ -93,6 +93,87 @@ if(WIN32)
     endif()
 
 elseif(UNIX)
+
+
+    # 通用下载+解压函数
+    # 用法: download_and_extract_if_needed(<url> <dest_dir> [SHA256 <hash>])
+    function(download_and_extract_if_needed _url _dest)
+        cmake_parse_arguments(_DL "" "SHA256" "" ${ARGN})
+
+        # 如果目标已存在，跳过
+        if(EXISTS "${_dest}")
+            message(STATUS "[Download] ${_dest} already exists, skipping.")
+            return()
+        endif()
+
+        get_filename_component(_archive "${_url}" NAME)
+        get_filename_component(_parent "${_dest}" DIRECTORY)
+        set(_archive_path "${_parent}/${_archive}")
+
+        # 下载
+        if(NOT EXISTS "${_archive_path}")
+            message(STATUS "[Download] Downloading ${_archive}")
+            file(MAKE_DIRECTORY "${_parent}")
+
+            set(_dl_opts SHOW_PROGRESS STATUS _status LOG _log)
+            if(DEFINED _DL_SHA256)
+                list(APPEND _dl_opts EXPECT_HASH SHA256=${_DL_SHA256})
+            endif()
+
+            file(DOWNLOAD "${_url}" "${_archive_path}" ${_dl_opts})
+            list(GET _status 0 _code)
+            if(NOT _code EQUAL 0)
+                file(REMOVE "${_archive_path}")
+                message(FATAL_ERROR "[Download] Failed: ${_log}")
+            endif()
+        endif()
+
+        # 解压到临时目录
+        set(_tmp "${_parent}/_tmp_extract")
+        file(REMOVE_RECURSE "${_tmp}")
+        file(MAKE_DIRECTORY "${_tmp}")
+
+        message(STATUS "[Download] Extracting to ${_dest}")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E tar xf "${_archive_path}"
+            WORKING_DIRECTORY "${_tmp}"
+            RESULT_VARIABLE _result
+            ERROR_VARIABLE _error
+        )
+
+        if(NOT _result EQUAL 0)
+            file(REMOVE_RECURSE "${_tmp}" "${_archive_path}")
+            message(FATAL_ERROR "[Download] Extract failed: ${_error}")
+        endif()
+
+        # 自动处理顶层目录
+        file(GLOB _items "${_tmp}/*")
+        list(LENGTH _items _count)
+
+        if(_count EQUAL 1)
+            get_filename_component(_first "${_items}" NAME)
+            if(IS_DIRECTORY "${_tmp}/${_first}")
+                # 只有一个目录，使用它的内容
+                file(GLOB _subitems "${_tmp}/${_first}/*")
+                if(_subitems)
+                    file(MAKE_DIRECTORY "${_dest}")
+                    foreach(_item ${_subitems})
+                        get_filename_component(_name "${_item}" NAME)
+                        file(RENAME "${_item}" "${_dest}/${_name}")
+                    endforeach()
+                    file(REMOVE_RECURSE "${_tmp}")
+                    message(STATUS "[Download] Succeeded: ${_dest}")
+                    return()
+                endif()
+            endif()
+        endif()
+
+        # 直接移动所有内容
+        file(MAKE_DIRECTORY "${_dest}")
+        file(RENAME "${_tmp}" "${_dest}")
+
+        message(STATUS "[Download] Succeeded: ${_dest}")
+    endfunction()
     # ============================================================
     # Linux/Unix 平台 - 使用 Boost.Context (FetchContent)
     # ============================================================
@@ -108,25 +189,13 @@ elseif(UNIX)
     # https://github.com/boostorg/boost/releases/download/boost-1.91.0-1/boost-1.91.0-1-cmake.tar.gz
     # Boost 官方压缩包 URL
     set(BOOST_URL "https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/boost-${BOOST_VERSION}-cmake.tar.gz")
-
+    set(PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/_deps")
     message(STATUS "libgo: Downloading Boost ${BOOST_VERSION} from ${BOOST_URL}")
-    set(PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../_deps")
-    # 下载压缩包
-    FetchContent_Declare(
-        boost
-        URL ${BOOST_URL}
-        SOURCE_DIR "${PACKAGE_DIR}/boost-src"
-        USES_TERMINAL_DOWNLOAD TRUE
+    set(boost_SOURCE_DIR "${PACKAGE_DIR}/boost-${BOOST_VERSION}" CACHE PATH "Boost SOURCE DIR" FORCE)
+    download_and_extract_if_needed(
+        ${BOOST_URL}
+        ${boost_SOURCE_DIR}
     )
-
-    FetchContent_GetProperties(boost)
-    if(NOT boost_POPULATED)
-        FetchContent_Populate(boost)
-        message(STATUS "Boost downloaded to: ${boost_SOURCE_DIR}")
-    endif()
-
-    # 设置 Boost 根目录
-    set(BOOST_ROOT "${boost_SOURCE_DIR}" CACHE PATH "Boost root" FORCE)
 
     # 配置 Boost 构建选项 - 只构建 context 库
     set(BUILD_SHARED_LIBS OFF)
@@ -149,12 +218,6 @@ elseif(UNIX)
         message(FATAL_ERROR "libgo: Boost version ${BOOST_VERSION} does not support CMake (need 1.70+)")
     endif()
 
-    # 不再需要 select_asm.sh，因为使用 Boost 的 CMake 构建
-    # 注释掉原来的汇编文件选择逻辑
-    # execute_process(
-    #     COMMAND bash "${libgo_SOURCE_DIR}/third_party/select_asm.sh" "${libgo_SOURCE_DIR}" "jump"
-    #     ...
-    # )
 endif()
 
 # ============================================================
