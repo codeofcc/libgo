@@ -77,10 +77,10 @@ namespace co
 
 } // namespace co
 
+
+#ifndef _WIN32
+
 #include <boost/context/detail/fcontext.hpp>
-
-
-
 namespace {
 
 // 新版 Boost 入口签名: void(transfer_t)
@@ -132,3 +132,4 @@ fcontext_t libgo_make_fcontext(void *stack, std::size_t size, fn_t fn)
 
     return boost::context::detail::make_fcontext(stack, size, &trampoline);
 }
+#endif
