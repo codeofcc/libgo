@@ -1115,7 +1115,17 @@ ATTRIBUTE_WEAK extern int __epoll_wait_nocancel(int epfd, struct epoll_event *ev
 // 某些版本libc.a中没有__usleep.
 ATTRIBUTE_WEAK int __usleep(useconds_t usec)
 {
-    timespec req = {usec / 1000000, usec * 1000};
+    // 32 位平台（如 Android armeabi-v7a）上 time_t 是 long、useconds_t 是 unsigned int，
+    // 直接 {usec / 1000000, usec * 1000} 会触发 -Wc++11-narrowing 硬错误。
+    // 另外原写法 usec * 1000 在 usec >= 1000000 时会让 tv_nsec > 999999999，
+    // 那是非法 timespec（nanosleep 返回 EINVAL），所以取余后再换算纳秒。
+    const unsigned long long sec  = static_cast<unsigned long long>(usec) / 1000000ULL;
+    const unsigned long long nsec = (static_cast<unsigned long long>(usec) % 1000000ULL) * 1000ULL;
+
+    timespec req;
+    req.tv_sec  = static_cast<time_t>(sec);
+    req.tv_nsec = static_cast<decltype(req.tv_nsec)>(nsec);
+
     return __nanosleep(&req, nullptr);
 }
 #endif

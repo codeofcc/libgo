@@ -102,6 +102,39 @@ if(WIN32)
 elseif(UNIX)
 
     # ============================================================
+    # 静态链接判定（netio hook 与链接参数共用同一判据）
+    #
+    # 注意两个常见误判：
+    #   1) BUILD_SHARED_LIBS 只决定 libgo_core 自身是 .a 还是 .so，
+    #      与"最终可执行文件是否静态链接 libc"无关。vpc 的常态就是 .a，
+    #      此时 dlsym(RTLD_NEXT) 完全可用，必须走动态 hook。
+    #   2) "-static" 不能用子串匹配：NDK 默认注入 -static-libstdc++，
+    #      子串匹配会把 Android 误判成全静态链接。
+    # 因此：只有显式打开 LIBGO_STATIC_HOOK，或链接参数里存在独立的 -static，
+    # 才启用 static_hook（它依赖 libc.a 提供 __read/__recv 等内部符号）。
+    # ============================================================
+    option(LIBGO_STATIC_HOOK "Force libc.a static hook instead of dlsym(RTLD_NEXT)" OFF)
+
+    string(APPEND _libgo_link_flags " ${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_EXE_LINKER_FLAGS_INIT} ")
+    # CMake 的正则不支持 POSIX 字符类（[[:space:]] 恒不匹配），必须用 [ \t]。
+    # 两端补空格，保证每个 token 都被空格包围，从而不会把 -static-libstdc++
+    # 这类选项误判成独立的 -static。
+    string(STRIP "${_libgo_link_flags}" _libgo_link_flags)
+    string(PREPEND _libgo_link_flags " ")
+    string(APPEND _libgo_link_flags " ")
+    if(_libgo_link_flags MATCHES "[ \t]-static[ \t]")
+        set(_libgo_static_link TRUE)
+    else()
+        set(_libgo_static_link FALSE)
+    endif()
+
+    if(LIBGO_STATIC_HOOK OR _libgo_static_link)
+        set(_libgo_use_static_hook TRUE)
+    else()
+        set(_libgo_use_static_hook FALSE)
+    endif()
+
+    # ============================================================
     # Linux/Unix 平台 - 网络 IO hook（netio/unix）
     # 之前 UNIX 分支只处理 Boost.Context，完全没有引用 netio/unix，
     # 导致 Linux/Android 上阻塞 socket 读不会让出协程。
@@ -111,9 +144,9 @@ elseif(UNIX)
     if(NOT LIBGO_DISABLE_HOOK)
         list(APPEND LIBGO_ALL_SOURCES ${LIBGO_NETIO_UNIX_SOURCES})
 
-        # 静态链接时必须提供 libc.a 的 __read/__recv 等内部符号（static_hook.cpp），
-        # 否则 hook.cpp 的 dlsym(RTLD_NEXT) 路径在静态链接下拿不到原始函数。
-        if(BUILD_SHARED_LIBS STREQUAL "OFF" OR CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
+        # 只有真正静态链接最终可执行文件时，才需要 libc.a 的 __read/__recv 等
+        # 内部符号（static_hook.cpp）；此时 hook.cpp 的 dlsym(RTLD_NEXT) 拿不到原函数。
+        if(_libgo_use_static_hook)
             list(APPEND LIBGO_ALL_SOURCES
                 "${libgo_SOURCE_DIR}/libgo/netio/unix/static_hook/static_hook.cpp")
             message(STATUS "libgo: netio/unix hooked (static link mode, static_hook enabled)")
@@ -389,9 +422,12 @@ elseif(UNIX)
     # ============================================================
 
     # ============================================================
-    # 静态链接专用配置
+    # 静态链接专用配置（复用上面的 _libgo_static_link 判定）
+    #
+    # 注意：这里会写 CMAKE_EXE_LINKER_FLAGS_INIT 到 CACHE FORCE，
+    # 一旦误判就会把 -static 永久注入整个项目的链接参数。
     # ============================================================
-    if(BUILD_SHARED_LIBS STREQUAL "OFF" OR CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
+    if(_libgo_static_link)
         # 强制 FindThreads 使用正确的静态链接参数
         # glibc 2.31 静态链接要求: -lpthread -lc -lgcc_eh
         SET(CMAKE_THREAD_LIBS_INIT "-lpthread -lc -lgcc_eh" CACHE STRING "" FORCE)
