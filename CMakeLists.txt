@@ -101,6 +101,30 @@ if(WIN32)
 
 elseif(UNIX)
 
+    # ============================================================
+    # Linux/Unix 平台 - 网络 IO hook（netio/unix）
+    # 之前 UNIX 分支只处理 Boost.Context，完全没有引用 netio/unix，
+    # 导致 Linux/Android 上阻塞 socket 读不会让出协程。
+    # ============================================================
+    file(GLOB LIBGO_NETIO_UNIX_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/unix/*.cpp")
+
+    if(NOT LIBGO_DISABLE_HOOK)
+        list(APPEND LIBGO_ALL_SOURCES ${LIBGO_NETIO_UNIX_SOURCES})
+
+        # 静态链接时必须提供 libc.a 的 __read/__recv 等内部符号（static_hook.cpp），
+        # 否则 hook.cpp 的 dlsym(RTLD_NEXT) 路径在静态链接下拿不到原始函数。
+        if(BUILD_SHARED_LIBS STREQUAL "OFF" OR CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
+            list(APPEND LIBGO_ALL_SOURCES
+                "${libgo_SOURCE_DIR}/libgo/netio/unix/static_hook/static_hook.cpp")
+            message(STATUS "libgo: netio/unix hooked (static link mode, static_hook enabled)")
+        else()
+            message(STATUS "libgo: netio/unix hooked (dynamic link mode, RTLD_NEXT)")
+        endif()
+    else()
+        file(GLOB LIBGO_DISABLE_HOOK_SOURCES "${libgo_SOURCE_DIR}/libgo/netio/disable_hook/*.cpp")
+        list(APPEND LIBGO_ALL_SOURCES ${LIBGO_DISABLE_HOOK_SOURCES})
+        message(STATUS "libgo: netio hook DISABLED (disable_hook)")
+    endif()
 
     # 通用下载+解压函数
     # 用法: download_and_extract_if_needed(<url> <dest_dir> [SHA256 <hash>])
@@ -288,6 +312,10 @@ elseif(UNIX)
         SET(CMAKE_EXE_LINKER_FLAGS_INIT "${CMAKE_EXE_LINKER_FLAGS_INIT} -static -Wl,--start-group -lpthread -lc -lgcc_eh -Wl,--end-group" CACHE STRING "" FORCE)
     endif()
 
+
+    target_include_directories(libgo_core
+        PRIVATE "${libgo_SOURCE_DIR}/libgo/netio/unix"
+    )
 
     find_package(Threads REQUIRED)
     target_link_libraries(libgo_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})

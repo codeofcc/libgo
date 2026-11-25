@@ -11,7 +11,7 @@ class Context
 {
 public:
     Context(fn_t fn, intptr_t vp, std::size_t stackSize)
-        : fn_(fn), vp_(vp), stackSize_(stackSize)
+        : fn_(fn), vp_(vp), stackSize_(stackSize), entered_(false)
     {
         stack_ = (char*)StackTraits::MallocFunc()(stackSize_);
         DebugPrint(dbg_task, "valloc stack. size=%u ptr=%p",
@@ -36,17 +36,30 @@ public:
 
     ALWAYS_INLINE void SwapIn()
     {
-        libgo_jump_fcontext(&GetTlsContext(), ctx_, vp_);
+        ContextBridge bridge;
+        bridge.slot_ = &GetTlsContext();                 // 调度线程挂起后的句柄存放处
+        bridge.vp_   = vp_;
+        bridge.fn_   = entered_ ? nullptr : fn_;         // 仅首次进入需要提供入口函数
+        libgo_jump_context(&GetTlsContext(), ctx_, &bridge);
+        entered_ = true;
     }
 
     ALWAYS_INLINE void SwapTo(Context & other)
     {
-        libgo_jump_fcontext(&ctx_, other.ctx_, other.vp_);
+        ContextBridge bridge;
+        bridge.slot_ = &ctx_;
+        bridge.vp_   = other.vp_;
+        bridge.fn_   = nullptr;
+        libgo_jump_context(&ctx_, other.ctx_, &bridge);
     }
 
     ALWAYS_INLINE void SwapOut()
     {
-        libgo_jump_fcontext(&ctx_, GetTlsContext(), 0);
+        ContextBridge bridge;
+        bridge.slot_ = &ctx_;                            // 我方句柄由调度线程写回，供下次 SwapIn 作为跳转目标
+        bridge.vp_   = 0;
+        bridge.fn_   = nullptr;
+        libgo_jump_context(&ctx_, GetTlsContext(), &bridge);
     }
 
     fcontext_t& GetTlsContext()
@@ -62,6 +75,7 @@ private:
     char* stack_ = nullptr;
     uint32_t stackSize_ = 0;
     int protectPage_ = 0;
+    bool entered_ = false; // 首次 SwapIn 需要把入口函数交给 trampoline
 };
 } // namespace co
 

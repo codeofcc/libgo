@@ -81,55 +81,88 @@ namespace co
 #ifndef _WIN32
 
 #include <boost/context/detail/fcontext.hpp>
+#include <cstdio>
+#include <cstdlib>
 namespace {
 
 // 新版 Boost 入口签名: void(transfer_t)
 // 作为旧版 fn_t(intptr_t) 与新 Boost 之间的桥梁
 // 仅在协程首次被激活时执行一次
+//
+// 语义要点（fork 原实现踩到的两个坑）：
+//
+// 1) 入口函数不能用 thread_local 传递。
+//    vpc 用的是 Scheduler::goStart()：Task 构造（libgo_make_fcontext）发生在调用 go
+//    的线程，而首次 SwapIn 发生在调度线程，两者不是同一线程，thread_local 会读到
+//    nullptr 并跳转到地址 0。入口函数改为随首次 jump 一起传入（ContextBridge::fn_）。
+//
+// 2) "跳入者挂起后的新句柄"必须由被跳入方写回跳入者指定的槽位。
+//    旧版 jump_fcontext(&ofc, nfc, vp) 在切换前由跳入者自己写 *ofc；
+//    新版 jump_fcontext(to, data) 把这个句柄作为 transfer_t.fctx 交给被跳入方。
+//    fork 原来在外层 libgo_jump_fcontext 里写 *ofc = t.fctx，那是"我方被跳回之后"，
+//    写进去的是对方的句柄，位置也错，导致首次 SwapOut 时 GetTlsContext() 仍为 0，
+//    jump_fcontext 跳到空句柄 -> SIGSEGV。
 static void FCONTEXT_CALL trampoline(boost::context::detail::transfer_t t) noexcept
 {
-    // 从 thread_local 获取用户函数（由 make_fcontext 设置）
-    extern thread_local fn_t g_pending_fn;
-    fn_t user_fn = g_pending_fn;
-    g_pending_fn = nullptr; // 用完即清
+    auto* bridge = reinterpret_cast<ContextBridge*>(t.data);
+    if (!bridge || !bridge->fn_ || !bridge->slot_) {
+        fprintf(stderr, "libgo: coroutine entry bridge invalid (bridge=%p)\n", (void*)bridge);
+        abort();
+    }
 
-    // t.data 就是首次 jump_fcontext(ctx, vp) 中的 vp
-    intptr_t user_vp = reinterpret_cast<intptr_t>(t.data);
+    // 等价于旧版 jump_fcontext 的 *ofc 写入：把跳入者（调度线程）挂起后的
+    // 新句柄交还给跳入者，供它之后 jump 回来。
+    *bridge->slot_ = t.fctx;
+
+    const fn_t user_fn = bridge->fn_;
+    const intptr_t user_vp = bridge->vp_;
+    bridge->fn_ = nullptr; // 入口函数只允许消费一次
 
     // 以旧版语义调用用户协程入口
     user_fn(user_vp);
 
-    // 协程函数不应正常返回
-    assert(false && "libgo: coroutine entry function must not return");
-    std::abort();
+    // 协程函数不应正常返回（它只能通过 jump_fcontext 离开）
+    fprintf(stderr, "libgo: coroutine entry function must not return\n");
+    abort();
 }
 
-thread_local fn_t g_pending_fn = nullptr;
-
 } // anonymous namespace
+
+// 我方作为跳入者：把 bridge 交给对方，由对方负责把 t.fctx 写入 bridge->slot_。
+// mine 位于本函数栈帧内，挂起期间依然有效，生命周期覆盖整个挂起期。
+intptr_t libgo_jump_context(fcontext_t *ofc, fcontext_t nfc, ContextBridge* bridge)
+{
+    ContextBridge mine = *bridge;
+    mine.slot_ = ofc;
+
+    // 走到下一行时，说明我方已被对方 jump 回来：
+    //   t.fctx = 对方挂起后的新句柄, t.data = 对方传来的 ContextBridge*
+    // 按旧版语义，把对方句柄写入对方要求的槽位（即对方的 *ofc），并返回对方的 vp。
+    auto t = boost::context::detail::jump_fcontext(nfc, &mine);
+
+    auto* peer = reinterpret_cast<ContextBridge*>(t.data);
+    if (peer) {
+        if (peer->slot_)
+            *peer->slot_ = t.fctx;
+        return peer->vp_;
+    }
+    return 0;
+}
 
 intptr_t libgo_jump_fcontext(fcontext_t *ofc, fcontext_t nfc,
                              intptr_t vp, bool /*preserve_fpu*/)
 {
-    // 新版: transfer_t jump_fcontext(fcontext_t to, void* data)
-    // 旧版的 ofc 现在通过返回值传回
-    auto t = boost::context::detail::jump_fcontext(
-        nfc, reinterpret_cast<void *>(vp));
-
-    if (ofc) {
-        *ofc = t.fctx;
-    }
-
-    // 旧版返回对方 jump 时传入的 vp，新版通过 t.data 传回，语义一致
-    return reinterpret_cast<intptr_t>(t.data);
+    ContextBridge bridge;
+    bridge.slot_ = ofc;
+    bridge.vp_   = vp;
+    bridge.fn_   = nullptr;
+    return libgo_jump_context(ofc, nfc, &bridge);
 }
 
 fcontext_t libgo_make_fcontext(void *stack, std::size_t size, fn_t fn)
 {
-    // make_fcontext 和紧随其后的首次 jump 总是在同一线程顺序执行
-    // 因此 thread_local 传递是安全的
-    g_pending_fn = fn;
-
+    // 入口函数不再在这里 smuggle；首次进入协程时由 Context 通过 ContextBridge::fn_ 传入。
+    (void)fn;
     return boost::context::detail::make_fcontext(stack, size, &trampoline);
 }
 #endif
