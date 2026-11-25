@@ -945,7 +945,12 @@ int fcntl(int __fd, int __cmd, ...)
     }
 }
 
+// ioctl 的 request 参数类型必须与系统头一致：bionic 用 int，glibc 用 unsigned long int。
+#if defined(__ANDROID__)
+int ioctl(int fd, int request, ...)
+#else
 int ioctl(int fd, unsigned long int request, ...)
+#endif
 {
     if (!ioctl_f) initHook();
 
@@ -1076,7 +1081,11 @@ ATTRIBUTE_WEAK extern unsigned int __sleep(unsigned int seconds);
 ATTRIBUTE_WEAK extern int __nanosleep(const struct timespec *req, struct timespec *rem);
 ATTRIBUTE_WEAK extern int __libc_close(int);
 ATTRIBUTE_WEAK extern int __fcntl(int __fd, int __cmd, ...);
+#if defined(__ANDROID__)
+ATTRIBUTE_WEAK extern int __ioctl(int fd, int request, ...);
+#else
 ATTRIBUTE_WEAK extern int __ioctl(int fd, unsigned long int request, ...);
+#endif
 ATTRIBUTE_WEAK extern int __getsockopt(int sockfd, int level, int optname,
         void *optval, socklen_t *optlen);
 ATTRIBUTE_WEAK extern int __setsockopt(int sockfd, int level, int optname,

@@ -80,14 +80,51 @@ namespace co
 
 #ifndef _WIN32
 
-#include <boost/context/detail/fcontext.hpp>
 #include <cstdio>
 #include <cstdlib>
+#include <cstddef>
 namespace {
 
-// 新版 Boost 入口签名: void(transfer_t)
-// 作为旧版 fn_t(intptr_t) 与新 Boost 之间的桥梁
-// 仅在协程首次被激活时执行一次
+// ============================================================
+// Boost.Context 桥接层（不依赖 Boost 头文件）
+//
+// libgo 只需要 Boost.Context 的 fcontext 三件套，它们由
+// third_party/boost_context/src/asm/*.S 提供，是纯 C ABI：
+//   void*      make_fcontext(void* sp, size_t size, void(*fn)(transfer_t));
+//   transfer_t jump_fcontext(void* to, void* vp);
+//   transfer_t ontop_fcontext(void* to, void* vp, transfer_t(*fn)(transfer_t));
+//
+// 这里用 extern "C" 直接声明，不再 #include <boost/context/detail/fcontext.hpp>。
+// 好处：不需要 Boost 的头文件体系（boost/config.hpp 等），构建时也就不必
+// 下载/配置整个 Boost 仓库（原本 691MB 只为拿 context 一个库）。
+//
+// transfer_t 与 Boost 的定义逐字节一致（{ void* fctx; void* data; }），
+// 在 Itanium C++ ABI 下单个聚合类型成员按 by-value 传递，
+// 因此与 Boost 编译出来的调用约定兼容。
+//
+// 汇编入口是隐藏符号（.globl + .hidden），只能被同一链接单元内的代码调用，
+// 所以必须在本文件内声明并包装，不对外暴露。
+// ============================================================
+
+struct FctxTransfer
+{
+    void* fctx;
+    void* data;
+};
+
+extern "C" {
+
+// 与 boostorg/context src/asm/*.S 中的定义一致
+void* make_fcontext(void* sp, std::size_t size, void (* fn)(FctxTransfer));
+
+FctxTransfer jump_fcontext(void* to, void* vp);
+
+FctxTransfer ontop_fcontext(void* to, void* vp, void (* fn)(FctxTransfer));
+
+} // extern "C"
+
+// 新版 Boost 入口签名: void(FctxTransfer)
+// 作为旧版 fn_t(intptr_t) 与新汇编入口之间的桥梁，仅在协程首次被激活时执行一次
 //
 // 语义要点（fork 原实现踩到的两个坑）：
 //
@@ -102,7 +139,7 @@ namespace {
 //    fork 原来在外层 libgo_jump_fcontext 里写 *ofc = t.fctx，那是"我方被跳回之后"，
 //    写进去的是对方的句柄，位置也错，导致首次 SwapOut 时 GetTlsContext() 仍为 0，
 //    jump_fcontext 跳到空句柄 -> SIGSEGV。
-static void FCONTEXT_CALL trampoline(boost::context::detail::transfer_t t) noexcept
+static void FCONTEXT_CALL trampoline(FctxTransfer t) noexcept
 {
     auto* bridge = reinterpret_cast<ContextBridge*>(t.data);
     if (!bridge || !bridge->fn_ || !bridge->slot_) {
@@ -138,7 +175,7 @@ intptr_t libgo_jump_context(fcontext_t *ofc, fcontext_t nfc, ContextBridge* brid
     // 走到下一行时，说明我方已被对方 jump 回来：
     //   t.fctx = 对方挂起后的新句柄, t.data = 对方传来的 ContextBridge*
     // 按旧版语义，把对方句柄写入对方要求的槽位（即对方的 *ofc），并返回对方的 vp。
-    auto t = boost::context::detail::jump_fcontext(nfc, &mine);
+    FctxTransfer t = jump_fcontext(nfc, &mine);
 
     auto* peer = reinterpret_cast<ContextBridge*>(t.data);
     if (peer) {
@@ -163,6 +200,6 @@ fcontext_t libgo_make_fcontext(void *stack, std::size_t size, fn_t fn)
 {
     // 入口函数不再在这里 smuggle；首次进入协程时由 Context 通过 ContextBridge::fn_ 传入。
     (void)fn;
-    return boost::context::detail::make_fcontext(stack, size, &trampoline);
+    return make_fcontext(stack, size, &trampoline);
 }
 #endif

@@ -38,7 +38,11 @@ extern unsigned int __sleep(unsigned int seconds);
 extern int __nanosleep(const struct timespec *req, struct timespec *rem);
 extern int __libc_close(int);
 extern int __fcntl(int __fd, int __cmd, ...);
+#if defined(__ANDROID__)
+extern int __ioctl(int fd, int request, ...);
+#else
 extern int __ioctl(int fd, unsigned long int request, ...);
+#endif
 extern int __getsockopt(int sockfd, int level, int optname,
         void *optval, socklen_t *optlen);
 extern int __setsockopt(int sockfd, int level, int optname,

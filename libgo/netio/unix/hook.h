@@ -89,7 +89,15 @@ extern close_t close_f;
 typedef int(*fcntl_t)(int __fd, int __cmd, ...);
 extern fcntl_t fcntl_f;
 
+// ioctl 第二个参数类型随 libc 而变：
+//   glibc   <sys/ioctl.h> : int ioctl(int fd, unsigned long int request, ...)
+//   bionic  <bits/ioctl.h>: int ioctl(int fd, int request, ...)
+// 定义必须与系统头完全一致，否则在 Android 上报 conflicting types for 'ioctl'。
+#if defined(__ANDROID__)
+typedef int(*ioctl_t)(int fd, int request, ...);
+#else
 typedef int(*ioctl_t)(int fd, unsigned long int request, ...);
+#endif
 extern ioctl_t ioctl_f;
 
 typedef int (*getsockopt_t)(int sockfd, int level, int optname,
